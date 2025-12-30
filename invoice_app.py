@@ -340,6 +340,29 @@ def remove_temp_files(paths):
 def export_to_excel(data_list, output_file):
     try:
         df = pd.DataFrame(data_list)
+
+        # Calcular el total de la columna "Total PO Amount"
+        total_amount = 0.0
+        for item in data_list:
+            amount_str = item.get("Total PO Amount", "")
+            if amount_str:
+                # Limpiar el formato: quitar $ y comas
+                clean_amount = amount_str.replace("$", "").replace(",", "")
+                try:
+                    total_amount += float(clean_amount)
+                except ValueError:
+                    pass
+
+        # Agregar fila de total
+        total_row = {
+            "GrandArcade": "",
+            "Purchase Order Date": "",
+            "Total PO Amount": f"${total_amount:,.2f}",
+            "Purchase Order Number": "TOTAL",
+            "Invoice Number": ""
+        }
+        df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+
         df.to_excel(output_file, index=False)
     except Exception:
         pass
@@ -415,7 +438,8 @@ def process_pdf_files(input_folder, output_folder, invoice_start, log=None):
     
     # Exportar a Excel
     if excel_data:
-        excel_path = os.path.join(output_folder, "PO_Data.xlsx")
+        fecha_actual = datetime.now().strftime('%Y-%m-%d')
+        excel_path = os.path.join(output_folder, f"PO_Data_{fecha_actual}.xlsx")
         export_to_excel(excel_data, excel_path)
         if log:
             log(f"📊 Datos exportados a: {os.path.basename(excel_path)}")
