@@ -367,10 +367,10 @@ def export_to_excel(data_list, output_file):
     except Exception:
         pass
 
-def process_pdf_files(input_folder, output_folder, invoice_start, log=None):
+def process_pdf_files(input_folder, output_folder, invoice_start, log=None, ask_detail_callback=None):
     extracted = []
     excel_data = []
-    
+
     # Buscar archivos PDF
     pdf_files = [f for f in os.listdir(input_folder) if f.lower().endswith('.pdf')]
     if not pdf_files:
@@ -410,12 +410,23 @@ def process_pdf_files(input_folder, output_folder, invoice_start, log=None):
     generated = []
     
     for info, original_name in extracted:
+        # Verificar si el detalle (GrandArcade) está vacío
+        if not info.get("GrandArcade", "").strip() and ask_detail_callback:
+            po_number = info.get("Purchase Order Number", original_name)
+            detail = ask_detail_callback(po_number, original_name)
+            if detail is None:
+                # Usuario canceló, saltar este archivo
+                if log:
+                    log(f"⏭️ Saltando {original_name} (cancelado por usuario)")
+                continue
+            info["GrandArcade"] = detail
+
         out_name = f"Invoice_{invoice_number}_Netflix_{info['Purchase Order Number']}.pdf"
         out_path = os.path.join(output_folder, out_name)
-        
+
         if log:
             log(f"Generating {out_name}")
-        
+
         try:
             fill_pdf(TEMPLATE_PATH, out_path, info, invoice_number)
             imgs = convert_pdf_to_images(out_path, output_folder)
@@ -767,6 +778,27 @@ class InvoiceApp(QWidget):
             self.log(f"❌ Error cargando facturas: {e}")
             QMessageBox.critical(self, "Error", f"Error cargando facturas: {e}")
 
+    def ask_for_detail(self, po_number, filename):
+        """Muestra un popup para pedir el detalle cuando está vacío en la PO."""
+        detail, ok = QInputDialog.getText(
+            self,
+            "Detalle Faltante",
+            f"El archivo '{filename}' (PO: {po_number}) no tiene detalle.\n\n"
+            "Por favor ingresa el detalle para la factura:",
+            QLineEdit.Normal,
+            ""
+        )
+        if ok and detail.strip():
+            self.log(f"📝 Detalle ingresado para {po_number}: {detail.strip()}")
+            return detail.strip()
+        elif ok:
+            # Usuario presionó OK pero no ingresó nada
+            QMessageBox.warning(self, "Detalle Vacío", "El detalle no puede estar vacío.")
+            return self.ask_for_detail(po_number, filename)  # Reintentar
+        else:
+            # Usuario canceló
+            return None
+
     def generate(self):
         # Validaciones
         inp = self.input_edit.text().strip()
@@ -821,7 +853,7 @@ class InvoiceApp(QWidget):
         
         # Generar facturas
         try:
-            self.invoices = process_pdf_files(inp, out, num, log=self.log)
+            self.invoices = process_pdf_files(inp, out, num, log=self.log, ask_detail_callback=self.ask_for_detail)
             
             # Actualizar lista
             for inv in self.invoices:
